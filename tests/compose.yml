@@ -1,0 +1,51 @@
+name: trend-ci
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment: {POSTGRES_USER: studio, POSTGRES_PASSWORD: ci-only-password, POSTGRES_DB: studio}
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U studio"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  fixture:
+    image: trend-fixture:ci
+  storage:
+    image: trend-studio:ci
+    user: "0:0"
+    command: ["storage-init"]
+    environment: {DATA_DIR: /data}
+    volumes: ["data:/data"]
+  migrate:
+    image: trend-studio:ci
+    command: ["migrate"]
+    env_file: runtime.env
+    volumes: ["data:/data"]
+    depends_on:
+      db: {condition: service_healthy}
+      storage: {condition: service_completed_successfully}
+  bootstrap:
+    image: trend-studio:ci
+    command: ["bootstrap-admin"]
+    env_file: runtime.env
+    environment: {BOOTSTRAP_ADMIN_EMAIL: admin@example.test, BOOTSTRAP_ADMIN_PASSWORD: CIonlyPassword123}
+    volumes: ["data:/data"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  api:
+    image: trend-studio:ci
+    command: ["api"]
+    env_file: runtime.env
+    ports: ["8080:8080"]
+    volumes: ["data:/data"]
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+  worker:
+    image: trend-studio:ci
+    command: ["worker"]
+    env_file: runtime.env
+    volumes: ["data:/data"]
+    depends_on:
+      api: {condition: service_started}
+volumes:
+  data:

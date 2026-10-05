@@ -1,0 +1,66 @@
+name: trend-studio
+x-app: &app
+  image: ${TREND_IMAGE:?Set immutable TREND_IMAGE SHA tag or digest}
+  env_file: .env
+  environment:
+    DATA_DIR: /data
+  volumes: [studio-data:/data]
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: studio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Required}
+      POSTGRES_DB: studio
+    volumes: [studio-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U studio -d studio"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  storage-init:
+    <<: *app
+    user: "0:0"
+    command: ["storage-init"]
+    restart: "no"
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    depends_on:
+      db: {condition: service_healthy}
+      storage-init: {condition: service_completed_successfully}
+    restart: "no"
+  api:
+    <<: *app
+    command: ["api"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    expose: ["8080"]
+    healthcheck:
+      test: ["CMD", "/app/trend-studio", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  worker:
+    <<: *app
+    command: ["worker"]
+    depends_on:
+      api: {condition: service_healthy}
+    stop_grace_period: 45s
+  caddy:
+    image: caddy:2.10.2-alpine
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set domain}
+    ports: ["80:80", "443:443"]
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro",caddy-data:/data,caddy-config:/config]
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+volumes:
+  studio-db:
+  studio-data:
+  caddy-data:
+  caddy-config:
