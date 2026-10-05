@@ -1,0 +1,43 @@
+name: Prepare dependency locks
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve and format sources in cloud
+        run: |
+          go mod tidy
+          gofmt -w cmd internal
+          cd web
+          npm install --package-lock-only --ignore-scripts
+      - name: Pin licensed Chinese font
+        run: |
+          mkdir -p fonts
+          commit=$(curl --fail -s https://api.github.com/repos/notofonts/noto-cjk/commits/main | jq -r .sha)
+          url="https://raw.githubusercontent.com/notofonts/noto-cjk/$commit/Sans/Variable/TTF/Subset/NotoSansSC-VF.ttf"
+          curl --fail -L "$url" -o /tmp/NotoSansSC.ttf
+          sha=$(sha256sum /tmp/NotoSansSC.ttf | cut -d' ' -f1)
+          printf '%s\n%s\n' "$url" "$sha" > fonts/source.lock
+          curl --fail -L "https://raw.githubusercontent.com/notofonts/noto-cjk/$commit/LICENSE" -o fonts/OFL.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prepared-source
+          path: |
+            go.mod
+            go.sum
+            cmd
+            internal
+            web/package-lock.json
+            fonts/source.lock
+            fonts/OFL.txt
