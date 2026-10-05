@@ -292,11 +292,11 @@ func (a *App) collectJob(ctx context.Context, j Job) error {
 	if err != nil {
 		return err
 	}
-	slot, err := a.acquire(ctx, "collector", j.ID, limits.Collect)
+	slot, err := a.acquire(ctx, "collector", j.Owner, limits.Collect)
 	if err != nil {
 		return err
 	}
-	defer a.release("collector", j.ID, slot)
+	defer a.release("collector", j.Owner, slot)
 	path, method, body := "", "GET", any(nil)
 	if data.TaskID != "" {
 		path = "/api/v1/tasks/" + url.PathEscape(data.TaskID)

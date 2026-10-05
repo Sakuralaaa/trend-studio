@@ -73,7 +73,8 @@ func (a *App) Worker(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			for ctx.Err() == nil {
-				j, err := a.claim(ctx, owner)
+				leaseOwner := owner + ":" + newID()
+				j, err := a.claim(ctx, leaseOwner)
 				if err != nil {
 					if err != pgx.ErrNoRows {
 						slog.Error("claim job", "error", err)
@@ -85,7 +86,7 @@ func (a *App) Worker(ctx context.Context) error {
 					}
 					continue
 				}
-				a.runJob(ctx, owner, j)
+				a.runJob(ctx, leaseOwner, j)
 			}
 		}()
 	}
@@ -107,6 +108,7 @@ func (a *App) Worker(ctx context.Context) error {
 	return nil
 }
 func (a *App) runJob(parent context.Context, owner string, j Job) {
+	j.Owner = owner
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	done := make(chan struct{})
@@ -121,12 +123,12 @@ func (a *App) runJob(parent context.Context, owner string, j Job) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				tag, err := a.DB.Exec(ctx, "UPDATE jobs SET lease_until=now()+interval '60 seconds' WHERE id=$1 AND owner=$2 AND status='running'", j.ID, owner)
+				tag, err := a.DB.Exec(ctx, "UPDATE jobs SET lease_until=now()+interval '60 seconds' WHERE id=$1 AND owner=$2 AND status='running' AND lease_until>now()", j.ID, owner)
 				if err != nil || tag.RowsAffected() != 1 {
 					cancel()
 					return
 				}
-				if _, err = a.DB.Exec(ctx, "UPDATE resource_leases SET lease_until=now()+interval '60 seconds' WHERE owner=$1 AND lease_until>now()", j.ID); err != nil {
+				if _, err = a.DB.Exec(ctx, "UPDATE resource_leases SET lease_until=now()+interval '60 seconds' WHERE owner=$1 AND lease_until>now()", owner); err != nil {
 					cancel()
 					return
 				}
@@ -140,12 +142,12 @@ func (a *App) runJob(parent context.Context, owner string, j Job) {
 			err = fmt.Errorf("missing task context")
 			break
 		}
-		slot, e := a.acquire(ctx, "tenant:"+*j.TenantID, j.ID, 1)
+		slot, e := a.acquire(ctx, "tenant:"+*j.TenantID, owner, 1)
 		if e != nil {
 			err = e
 			break
 		}
-		defer a.release("tenant:"+*j.TenantID, j.ID, slot)
+		defer a.release("tenant:"+*j.TenantID, owner, slot)
 		if j.Kind == "generation" {
 			err = a.executeGeneration(ctx, j)
 		} else {
@@ -194,8 +196,12 @@ func (a *App) executeGeneration(ctx context.Context, j Job) error {
 	if g.Status == "cancelled" {
 		return nil
 	}
-	if _, err = a.DB.Exec(ctx, "UPDATE generations SET status='running',updated_at=now() WHERE id=$1 AND status!='cancelled'", gid); err != nil {
+	tag, err := a.DB.Exec(ctx, "UPDATE generations SET status='running',updated_at=now() WHERE id=$1 AND status!='cancelled'", gid)
+	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil
 	}
 	var wg sync.WaitGroup
 	errs := make(chan error, len(g.Items))
@@ -241,11 +247,11 @@ func (a *App) executeItem(ctx context.Context, j Job, g Generation, it Item) err
 	if kind == "text" {
 		limit = limits.Text
 	}
-	slot, err := a.waitLease(ctx, "provider:"+kind, j.ID, limit)
+	slot, err := a.waitLease(ctx, "provider:"+kind, j.Owner, limit)
 	if err != nil {
 		return err
 	}
-	defer a.release("provider:"+kind, j.ID, slot)
+	defer a.release("provider:"+kind, j.Owner, slot)
 	var attempt, state string
 	var path *string
 	err = a.DB.QueryRow(ctx, "SELECT id,status,response_path FROM provider_attempts WHERE item_id=$1 AND started_at >= (SELECT created_at FROM quotes WHERE id=(SELECT quote_id FROM generation_items WHERE id=$1)) ORDER BY started_at DESC LIMIT 1", it.ID).Scan(&attempt, &state, &path)
@@ -272,6 +278,13 @@ func (a *App) executeItem(ctx context.Context, j Job, g Generation, it Item) err
 		return a.finishItem(ctx, *j.TenantID, g.ID, it, "failed", "提供商明确拒绝请求", attempt)
 	}
 	if state == "prepared" {
+		var owned bool
+		if err = a.DB.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM jobs WHERE id=$1 AND owner=$2 AND status='running' AND lease_until>now())", j.ID, j.Owner).Scan(&owned); err != nil {
+			return err
+		}
+		if !owned {
+			return fmt.Errorf("job lease lost before provider submission")
+		}
 		if _, err = a.DB.Exec(ctx, "UPDATE generation_items SET status='running' WHERE id=$1", it.ID); err != nil {
 			return err
 		}
@@ -331,7 +344,16 @@ func (a *App) executeItem(ctx context.Context, j Job, g Generation, it Item) err
 		Usage json.RawMessage `json:"usage"`
 	}
 	_ = json.Unmarshal(raw, &usage)
-	if _, err = a.DB.Exec(ctx, "UPDATE provider_attempts SET usage=$1 WHERE id=$2", nullableJSON(usage.Usage), attempt); err != nil {
+	var estimated *float64
+	var tokens struct {
+		Prompt     int64 `json:"prompt_tokens"`
+		Completion int64 `json:"completion_tokens"`
+	}
+	if json.Unmarshal(usage.Usage, &tokens) == nil && (p.InputRate > 0 || p.OutputRate > 0) && p.Currency != "" && tokens.Prompt >= 0 && tokens.Completion >= 0 {
+		cost := (float64(tokens.Prompt)*p.InputRate + float64(tokens.Completion)*p.OutputRate) / 1_000_000
+		estimated = &cost
+	}
+	if _, err = a.DB.Exec(ctx, "UPDATE provider_attempts SET usage=$1,estimated_cost=$2,currency=$3 WHERE id=$4", nullableJSON(usage.Usage), estimated, nullable(p.Currency), attempt); err != nil {
 		return err
 	}
 	return a.finishItem(ctx, *j.TenantID, g.ID, it, "succeeded", "", attempt)

@@ -22,6 +22,12 @@ CREATE INDEX IF NOT EXISTS asset_product ON assets(tenant_id,product_id,kind);
 CREATE TABLE IF NOT EXISTS provider_attempts(id uuid PRIMARY KEY, item_id uuid REFERENCES generation_items, generation_id uuid REFERENCES generations, provider_id uuid REFERENCES provider_configs, kind text NOT NULL, status text NOT NULL DEFAULT 'prepared', response_path text, request_id text, usage jsonb, estimated_cost numeric, actual_cost numeric, currency text, error text, duration_ms bigint, started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz);
 CREATE INDEX IF NOT EXISTS attempt_item ON provider_attempts(item_id,started_at DESC);
 CREATE TABLE IF NOT EXISTS credit_ledger(id uuid PRIMARY KEY, tenant_id uuid NOT NULL REFERENCES tenants, generation_id uuid REFERENCES generations, item_id uuid REFERENCES generation_items, event_key text UNIQUE NOT NULL, type text NOT NULL, available_delta bigint NOT NULL, reserved_delta bigint NOT NULL, balance_after bigint NOT NULL, reserved_after bigint NOT NULL, description text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE OR REPLACE FUNCTION reject_ledger_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'credit ledger entries cannot be changed or deleted';
+END; $$;
+DROP TRIGGER IF EXISTS immutable_credit_ledger ON credit_ledger;
+CREATE TRIGGER immutable_credit_ledger BEFORE UPDATE OR DELETE ON credit_ledger FOR EACH ROW EXECUTE FUNCTION reject_ledger_mutation();
 CREATE TABLE IF NOT EXISTS jobs(id uuid PRIMARY KEY, kind text NOT NULL, tenant_id uuid REFERENCES tenants, generation_id uuid REFERENCES generations, data jsonb NOT NULL DEFAULT '{}', dedupe_key text UNIQUE, status text NOT NULL DEFAULT 'queued', owner text, lease_until timestamptz, next_run_at timestamptz NOT NULL DEFAULT now(), attempts integer NOT NULL DEFAULT 0, error text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS job_claim ON jobs(status,next_run_at,created_at);
 CREATE TABLE IF NOT EXISTS resource_leases(resource text NOT NULL, slot integer NOT NULL, owner text NOT NULL, lease_until timestamptz NOT NULL, PRIMARY KEY(resource,slot));

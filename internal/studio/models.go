@@ -221,6 +221,7 @@ type Generation struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 type Job struct {
+	Owner        string
 	ID           string
 	Kind         string
 	TenantID     *string
