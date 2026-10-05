@@ -3,13 +3,14 @@ import type {APIRequestContext,Page} from '@playwright/test'
 import fs from 'node:fs/promises'
 async function api<T>(client:APIRequestContext,path:string,data?:unknown,method='POST'):Promise<T>{const response=await client.fetch('/api/v1'+path,{method,data});const envelope=await response.json();expect(response.ok(),JSON.stringify(envelope)).toBeTruthy();return envelope.data as T}
 async function screenshot(page:Page,name:string){await page.screenshot({path:'test-results/screenshots/'+name+'.png',fullPage:true})}
-const reference=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0e8AAAAASUVORK5CYII=','base64')
 test('real API workflow, billing, isolation and responsive UI',async({browser})=>{
  const admin=await browser.newContext({baseURL:'http://localhost:8080'}),merchant=await browser.newContext({baseURL:'http://localhost:8080'}),other=await browser.newContext({baseURL:'http://localhost:8080'})
  await api(admin.request,'/auth/login',{email:'admin@example.test',password:'CIonlyPassword123'})
  for(const [ctx,email] of [[merchant,'merchant@example.test'],[other,'other@example.test']] as const){const invite=await api<{url:string}>(admin.request,'/admin/invites',{email,default_credits:500,name:''});await api(ctx.request,'/auth/invite',{token:new URL(invite.url).searchParams.get('token'),email,name:'日常好物店',password:'CImerchantPassword123'})}
  const page=await merchant.newPage();await page.goto('/');await expect(page).toHaveURL(/products/);await expect(page.getByRole('heading',{name:'上传你的第一件商品'})).toBeVisible()
  for(const [width,height,name] of [[1440,1000,'desktop'],[1024,768,'tablet'],[390,844,'mobile']] as const){await page.setViewportSize({width,height});await screenshot(page,name+'-empty')}
+ const imageData=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=500;canvas.height=500;const ctx=canvas.getContext('2d')!;ctx.fillStyle='#efebe4';ctx.fillRect(0,0,500,500);ctx.fillStyle='#c6b79f';ctx.beginPath();ctx.moveTo(170,120);ctx.lineTo(220,100);ctx.quadraticCurveTo(250,130,280,100);ctx.lineTo(330,120);ctx.lineTo(390,210);ctx.lineTo(330,240);ctx.lineTo(310,210);ctx.lineTo(320,405);ctx.lineTo(180,405);ctx.lineTo(190,210);ctx.lineTo(170,240);ctx.lineTo(110,210);ctx.closePath();ctx.fill();ctx.strokeStyle='#97866c';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(250,130);ctx.lineTo(250,398);ctx.stroke();for(let y=160;y<390;y+=42){ctx.fillStyle='#eee8de';ctx.beginPath();ctx.arc(255,y,4,0,Math.PI*2);ctx.fill()}return canvas.toDataURL('image/png').split(',')[1]})
+ const reference=Buffer.from(imageData,'base64')
  // Exercise the actual file picker and empty form, never seed the frontend store.
  await page.getByRole('button',{name:'新增商品'}).click();await expect(page.getByLabel('商品名称 *')).toHaveValue('');await expect(page.getByLabel('类目 *')).toHaveValue('')
  await page.getByLabel('商品名称 *').fill('自然米色收纳盒');await page.getByLabel('类目 *').selectOption('家居日用')
