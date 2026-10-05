@@ -94,6 +94,15 @@ jobs:
           done
           docker compose -f tests/compose.yml logs
           exit 1
+      - name: Start upstream collector migration and runtime
+        run: |
+          docker compose --env-file deploy/collector/.env -f deploy/collector/compose.yml up -d
+          for n in $(seq 1 90); do
+            if curl --fail -s http://127.0.0.1:8000/readyz; then exit 0; fi
+            sleep 2
+          done
+          docker compose --env-file deploy/collector/.env -f deploy/collector/compose.yml logs
+          exit 1
       - name: Browser integration and UI screenshots
         working-directory: web
         env: {CI: 'true'}
@@ -112,6 +121,8 @@ jobs:
         run: |
           mkdir -p artifacts
           docker compose -f tests/compose.yml logs --no-color > artifacts/runtime.log
+          docker compose --env-file deploy/collector/.env -f deploy/collector/compose.yml ps > artifacts/collector-status.txt
+          docker compose --env-file deploy/collector/.env -f deploy/collector/compose.yml logs --no-color > artifacts/collector-runtime.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -122,7 +133,9 @@ jobs:
             web/playwright-report
       - name: Cleanup disposable CI data
         if: always()
-        run: docker compose -f tests/compose.yml down -v
+        run: |
+          docker compose -f tests/compose.yml down -v
+          docker compose --env-file deploy/collector/.env -f deploy/collector/compose.yml down -v
   publish:
     needs: [checks, containers]
     if: github.event_name != 'pull_request'

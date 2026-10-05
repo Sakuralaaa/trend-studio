@@ -40,12 +40,17 @@ services:
     volumes: ["data:/data"]
     depends_on:
       bootstrap: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD","/app/trend-studio","healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
   worker:
     image: trend-studio:ci
     command: ["worker"]
     env_file: runtime.env
     volumes: ["data:/data"]
     depends_on:
-      api: {condition: service_started}
+      api: {condition: service_healthy}
 volumes:
   data:
