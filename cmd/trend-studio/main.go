@@ -32,9 +32,13 @@ func run() error {
 	if command == "healthcheck" {
 		client := &http.Client{Timeout: 3 * time.Second}
 		response, err := client.Get("http://127.0.0.1:8080/health/ready")
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		defer response.Body.Close()
-		if response.StatusCode != 200 { return fmt.Errorf("service not ready: %d", response.StatusCode) }
+		if response.StatusCode != 200 {
+			return fmt.Errorf("service not ready: %d", response.StatusCode)
+		}
 		return nil
 	}
 	app, err := studio.New(ctx, cfg)

@@ -1,53 +1,64 @@
-# Separate collector stack; fixed upstream release, never builds on the host.
+# Fixed upstream v5.1.3, separate database and secrets. No host builds.
 name: trend-collector
 x-collector: &collector
   image: evil0ctal/douyin_tiktok_download_api:5.1.3
   env_file: .env
   restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  volumes: [collector-backups:/var/lib/dtk/backups]
 services:
-  timescaledb:
+  postgres:
     image: timescale/timescaledb-ha:pg17
     environment:
-      POSTGRES_USER: collector
-      POSTGRES_PASSWORD: ${COLLECTOR_DB_PASSWORD:?Required}
-      POSTGRES_DB: collector
+      POSTGRES_USER: dtk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Required}
+      POSTGRES_DB: dtk
     volumes: [collector-db:/home/postgres/pgdata/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U collector -d collector"]
+      test: ["CMD-SHELL","pg_isready -U dtk -d dtk"]
       interval: 5s
       timeout: 3s
       retries: 30
     restart: unless-stopped
   redis:
     image: redis:8.2.1-alpine
-    command: ["redis-server","--requirepass","${COLLECTOR_REDIS_PASSWORD:?Required}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Required}
+    command: ["sh","-c","exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --maxmemory 320mb --maxmemory-policy volatile-lru"]
     volumes: [collector-redis:/data]
     healthcheck:
-      test: ["CMD-SHELL","redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
+      test: ["CMD-SHELL","REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 20
-    environment:
-      REDIS_PASSWORD: ${COLLECTOR_REDIS_PASSWORD}
     restart: unless-stopped
   migrate:
     <<: *collector
-    command: ["alembic","upgrade","head"]
+    command: ["migrate"]
     depends_on:
-      timescaledb: {condition: service_healthy}
-      redis: {condition: service_healthy}
+      postgres: {condition: service_healthy}
     restart: "no"
   api:
     <<: *collector
-    command: ["uvicorn","app.main:app","--host","0.0.0.0","--port","8000"]
+    command: ["api"]
+    environment: {DTK_BIND_HOST: '0.0.0.0', DTK_BIND_PORT: '8000', DTK_CONSOLE_DIR: /app/web/dist, DTK_BACKUP_DIR: /var/lib/dtk/backups}
     ports: ["127.0.0.1:8000:8000"]
     depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz',timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
   worker:
     <<: *collector
-    command: ["celery","-A","app.core.celery_app:celery_app","worker","--loglevel=info","--concurrency=2"]
+    command: ["worker"]
     depends_on:
-      migrate: {condition: service_completed_successfully}
+      api: {condition: service_healthy}
+    stop_grace_period: 45s
 volumes:
   collector-db:
   collector-redis:
+  collector-backups:

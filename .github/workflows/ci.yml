@@ -45,6 +45,7 @@ jobs:
           FONT_PATH: /tmp/NotoSansSC.ttf
         run: |
           go vet ./...
+          set -o pipefail
           go test -race -count=1 -timeout 180s ./... | tee artifacts/go-tests.txt
       - name: Frontend checks
         working-directory: web
