@@ -29,7 +29,7 @@ jobs:
           curl --fail -L "$url" -o /tmp/NotoSansSC.ttf
           sha=$(sha256sum /tmp/NotoSansSC.ttf | cut -d' ' -f1)
           printf '%s\n%s\n' "$url" "$sha" > fonts/source.lock
-          curl --fail -L "https://raw.githubusercontent.com/notofonts/noto-cjk/$commit/LICENSE" -o fonts/OFL.txt
+          curl --fail -L "https://raw.githubusercontent.com/notofonts/noto-cjk/$commit/Sans/LICENSE" -o fonts/OFL.txt
       - uses: actions/upload-artifact@v4
         with:
           name: prepared-source
