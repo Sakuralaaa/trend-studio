@@ -175,11 +175,53 @@ func (a *App) runJob(parent context.Context, owner string, j Job) {
 		}
 		slog.Warn("job incomplete", "job", j.ID, "kind", j.Kind, "error", err)
 	}
-	_, _ = a.DB.Exec(finishCtx, "UPDATE jobs SET status=$1,next_run_at=$2,error=$3,lease_until=NULL,updated_at=now() WHERE id=$4 AND owner=$5", state, next, errorString(err), j.ID, owner)
+	tag, finishErr := a.DB.Exec(finishCtx, "UPDATE jobs SET status=$1,next_run_at=$2,error=$3,lease_until=NULL,updated_at=now() WHERE id=$4 AND owner=$5", state, next, errorString(err), j.ID, owner)
+	if finishErr != nil || tag.RowsAffected() == 0 {
+		return
+	}
+	if state == "failed" && j.Kind == "generation" && j.GenerationID != nil && j.TenantID != nil {
+		if recoveryErr := a.exhaustedGeneration(finishCtx, *j.TenantID, *j.GenerationID); recoveryErr != nil {
+			slog.Error("finalize exhausted generation", "error", recoveryErr)
+		}
+	}
 	if state == "failed" && j.Kind == "render" && j.GenerationID != nil {
 		_, _ = a.DB.Exec(finishCtx, "UPDATE generations SET render_pending=false WHERE id=$1", *j.GenerationID)
 		_, _ = a.DB.Exec(finishCtx, "UPDATE generation_items SET status='failed',error='排版失败，请保存文案后重试' WHERE generation_id=$1 AND kind IN ('selling_point_image','vertical_cover')", *j.GenerationID)
+		_ = a.finalize(finishCtx, *j.TenantID, *j.GenerationID)
 	}
+}
+func (a *App) exhaustedGeneration(ctx context.Context, tid, gid string) error {
+	g, err := a.generation(ctx, a.DB, tid, gid)
+	if err != nil {
+		return err
+	}
+	for _, it := range g.Items {
+		if it.Status != "pending" && it.Status != "running" {
+			continue
+		}
+		if it.ProviderType == "template" {
+			if _, err = a.DB.Exec(ctx, "UPDATE generation_items SET status='failed',error='排版处理未完成，可保存文案后重试' WHERE id=$1", it.ID); err != nil {
+				return err
+			}
+			continue
+		}
+		var attempt, attemptState string
+		err = a.DB.QueryRow(ctx, "SELECT id,status FROM provider_attempts WHERE item_id=$1 AND started_at >= (SELECT created_at FROM quotes WHERE id=(SELECT quote_id FROM generation_items WHERE id=$1)) ORDER BY started_at DESC LIMIT 1", it.ID).Scan(&attempt, &attemptState)
+		if err != nil && err != pgx.ErrNoRows {
+			return err
+		}
+		state := "needs_review"
+		if err == pgx.ErrNoRows || attemptState == "prepared" || attemptState == "rejected" {
+			state = "failed"
+		}
+		if err = a.finishItem(ctx, tid, gid, it, state, "任务恢复达到上限，请管理员核实", attempt); err != nil {
+			return err
+		}
+	}
+	if _, err = a.DB.Exec(ctx, "UPDATE generations SET render_pending=false WHERE id=$1", gid); err != nil {
+		return err
+	}
+	return a.finalize(ctx, tid, gid)
 }
 func errorString(err error) any {
 	if err == nil {
@@ -349,7 +391,7 @@ func (a *App) executeItem(ctx context.Context, j Job, g Generation, it Item) err
 		Prompt     int64 `json:"prompt_tokens"`
 		Completion int64 `json:"completion_tokens"`
 	}
-	if json.Unmarshal(usage.Usage, &tokens) == nil && (p.InputRate > 0 || p.OutputRate > 0) && p.Currency != "" && tokens.Prompt >= 0 && tokens.Completion >= 0 {
+	if json.Unmarshal(usage.Usage, &tokens) == nil && (p.InputRate > 0 || p.OutputRate > 0) && p.Currency != "" && tokens.Prompt >= 0 && tokens.Completion >= 0 && tokens.Prompt+tokens.Completion > 0 {
 		cost := (float64(tokens.Prompt)*p.InputRate + float64(tokens.Completion)*p.OutputRate) / 1_000_000
 		estimated = &cost
 	}
@@ -394,7 +436,7 @@ func (a *App) finishItem(ctx context.Context, tid, gid string, it Item, state, m
 	if state == "needs_review" {
 		attemptState = "unknown"
 	}
-	if _, err = tx.Exec(ctx, "UPDATE provider_attempts SET status=$1,finished_at=now() WHERE id=$2", attemptState, attempt); err != nil {
+	if _, err = tx.Exec(ctx, "UPDATE provider_attempts SET status=$1,finished_at=now() WHERE id=$2", attemptState, nullable(attempt)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

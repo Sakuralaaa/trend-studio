@@ -19,12 +19,17 @@ func (a *App) creditChange(ctx context.Context, db DBTX, tid, gid, iid, key, kin
 	if err := db.QueryRow(ctx, "SELECT available,reserved FROM tenants WHERE id=$1 FOR UPDATE", tid).Scan(&balance, &hold); err != nil {
 		return err
 	}
-	var exists bool
-	if err := db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM credit_ledger WHERE event_key=$1)", key).Scan(&exists); err != nil {
-		return err
-	}
-	if exists {
+	var previousTenant, previousKind, previousGeneration, previousItem string
+	var previousAvailable, previousReserved int64
+	err := db.QueryRow(ctx, "SELECT tenant_id,type,COALESCE(generation_id::text,''),COALESCE(item_id::text,''),available_delta,reserved_delta FROM credit_ledger WHERE event_key=$1", key).Scan(&previousTenant, &previousKind, &previousGeneration, &previousItem, &previousAvailable, &previousReserved)
+	if err == nil {
+		if previousTenant != tid || previousKind != kind || previousGeneration != gid || previousItem != iid || previousAvailable != available || previousReserved != reserved {
+			return problem(409, "KEY_CONFLICT", "额度操作标识已用于另一项调整")
+		}
 		return nil
+	}
+	if err != pgx.ErrNoRows {
+		return err
 	}
 	if balance+available < 0 || hold+reserved < 0 {
 		return problem(409, "INSUFFICIENT_CREDITS", "可用额度不足")
@@ -32,7 +37,7 @@ func (a *App) creditChange(ctx context.Context, db DBTX, tid, gid, iid, key, kin
 	if _, err := db.Exec(ctx, "UPDATE tenants SET available=available+$1,reserved=reserved+$2 WHERE id=$3", available, reserved, tid); err != nil {
 		return err
 	}
-	_, err := db.Exec(ctx, "INSERT INTO credit_ledger(id,tenant_id,generation_id,item_id,event_key,type,available_delta,reserved_delta,balance_after,reserved_after,description) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", newID(), tid, nullable(gid), nullable(iid), key, kind, available, reserved, balance+available, hold+reserved, description)
+	_, err = db.Exec(ctx, "INSERT INTO credit_ledger(id,tenant_id,generation_id,item_id,event_key,type,available_delta,reserved_delta,balance_after,reserved_after,description) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", newID(), tid, nullable(gid), nullable(iid), key, kind, available, reserved, balance+available, hold+reserved, description)
 	return err
 }
 func (a *App) creditsHTTP(w http.ResponseWriter, r *http.Request) error {

@@ -18,7 +18,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestGrowth(t *testing.T) {
@@ -275,7 +274,51 @@ func TestDatabaseWorkflow(t *testing.T) {
 	if out.Code != 400 {
 		t.Fatal("invalid image accepted")
 	}
-	_ = time.Now()
+	staleResponse := call("POST", "/quote", map[string]string{"product_id": ids[1]})
+	if staleResponse.Code != 200 {
+		t.Fatal(staleResponse.Body.String())
+	}
+	if err = json.Unmarshal(staleResponse.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = app.DB.Exec(ctx, "UPDATE products SET version=version+1 WHERE id=$1", ids[1])
+	stale := call("POST", "/submit", map[string]string{"quote_id": envelope.Data.ID, "idempotency_key": envelope.Data.IdempotencyKey})
+	if stale.Code != 409 || !strings.Contains(stale.Body.String(), "QUOTE_STALE") {
+		t.Fatal("changed product accepted stale quote", stale.Body.String())
+	}
+	if _, err = app.DB.Exec(ctx, "UPDATE credit_ledger SET description='changed' WHERE tenant_id=$1", tid); err == nil {
+		t.Fatal("credit ledger is mutable")
+	}
+	job, err := app.claim(ctx, "old-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = app.DB.Exec(ctx, "UPDATE jobs SET lease_until=now()-interval '1 second' WHERE id=$1", job.ID)
+	reclaimed, err := app.claim(ctx, "new-owner")
+	if err != nil || reclaimed.ID != job.ID {
+		t.Fatal("expired job was not recovered", reclaimed, err)
+	}
+	tag, err := app.DB.Exec(ctx, "UPDATE jobs SET lease_until=now()+interval '60 seconds' WHERE id=$1 AND owner='old-owner'", job.ID)
+	if err != nil || tag.RowsAffected() != 0 {
+		t.Fatal("old worker renewed a reclaimed lease")
+	}
+	slot, err := app.acquire(ctx, "fixture-limit", "old-owner", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = app.acquire(ctx, "fixture-limit", "blocked-owner", 1); err == nil {
+		t.Fatal("shared concurrency limit exceeded")
+	}
+	_, _ = app.DB.Exec(ctx, "UPDATE resource_leases SET lease_until=now()-interval '1 second' WHERE resource='fixture-limit'")
+	newSlot, err := app.acquire(ctx, "fixture-limit", "new-owner", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.release("fixture-limit", "old-owner", slot)
+	var owner string
+	if err = app.DB.QueryRow(ctx, "SELECT owner FROM resource_leases WHERE resource='fixture-limit' AND slot=$1", newSlot).Scan(&owner); err != nil || owner != "new-owner" {
+		t.Fatal("old worker deleted replacement lease")
+	}
 }
 func chiContext(key, value string) *chi.Context {
 	r := chi.NewRouteContext()

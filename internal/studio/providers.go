@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -144,7 +146,10 @@ func (a *App) requestModel(ctx context.Context, p Provider, preset, kind string,
 			if err != nil {
 				return nil, err
 			}
-			dest, err := mp.CreateFormFile(p.ImageField, filepath.Base(path))
+			header := make(textproto.MIMEHeader)
+			header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, p.ImageField, filepath.Base(path)))
+			header.Set("Content-Type", mime.TypeByExtension(filepath.Ext(path)))
+			dest, err := mp.CreatePart(header)
 			if err == nil {
 				_, err = io.Copy(dest, f)
 			}

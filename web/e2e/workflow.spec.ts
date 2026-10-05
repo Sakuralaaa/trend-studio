@@ -27,7 +27,7 @@ test('real API workflow, billing, isolation and responsive UI',async({browser})=
  await expect(page.getByText('管理员尚未配置文字接口')).toBeVisible();await screenshot(page,'unconfigured')
  for(const kind of ['text','image']){await api(admin.request,'/admin/providers',{kind,name:'CI '+kind,base_url:'http://fixture:8091/v1',model:'fixture',api_key:'ci-only',image_field:'image[]',max_references:6,size:'1024x1024',timeout_seconds:10,result_hosts:[]})}
  await page.reload();await expect(page.getByRole('button',{name:'生成素材',exact:true})).toBeEnabled();await expect(page.getByRole('button',{name:/商品展示/})).toHaveAttribute('aria-pressed','true')
- await page.getByLabel('选择商品').selectOption(first);await page.getByLabel('选择商品').selectOption(second.id)
+ await page.getByLabel('选择商品',{exact:true}).selectOption(first);await page.getByLabel('选择商品',{exact:true}).selectOption(second.id)
  for(const [width,height,name] of [[1440,1000,'desktop'],[1024,768,'tablet'],[390,844,'mobile']] as const){await page.setViewportSize({width,height});await screenshot(page,name+'-create')}
  await page.getByRole('button',{name:'生成素材',exact:true}).click();await expect(page).toHaveURL(/creations\//)
  const id=page.url().split('/').at(-1)!
