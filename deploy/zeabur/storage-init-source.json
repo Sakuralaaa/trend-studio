@@ -1,0 +1,9 @@
+{
+  "source": {
+    "image": "ghcr.io/sakuralaaa/trend-studio:sha-REPLACE_VERIFIED_COMMIT",
+    "command": ["/app/trend-studio"],
+    "args": ["storage-init"],
+    "runAsUserID": 0
+  },
+  "preserveExistingEnv": true
+}
