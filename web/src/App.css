@@ -8,3 +8,5 @@ button,input,select,textarea{font:inherit;font-size:14px}button,.primary{min-hei
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 html,body{font-size:14px;background:#f8f8f7;color:#252525}.account button.credits{display:block;text-align:left}.credit-ledger .notice{margin-bottom:10px}
+.mobile-generation-summary{display:none}
+@media(max-width:800px){.mobile-generation-summary{display:block;margin:0 0 8px;font-size:12px;line-height:1.6;overflow-wrap:anywhere}.studio-layout{padding-bottom:140px}.toast-stack{bottom:calc(85px + env(safe-area-inset-bottom));right:16px;width:calc(100% - 32px)}body:has(.generate-action) .toast-stack{bottom:calc(205px + env(safe-area-inset-bottom))}}

@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test'
 import type {APIRequestContext,Page} from '@playwright/test'
 import fs from 'node:fs/promises'
 async function api<T>(client:APIRequestContext,path:string,data?:unknown,method='POST'):Promise<T>{const response=await client.fetch('/api/v1'+path,{method,data});const envelope=await response.json();expect(response.ok(),JSON.stringify(envelope)).toBeTruthy();return envelope.data as T}
-async function screenshot(page:Page,name:string){await expect.poll(()=>page.evaluate(()=>Array.from(document.images).every(img=>img.complete))).toBe(true);await page.screenshot({path:'test-results/screenshots/'+name+'.png',fullPage:false,animations:'disabled'})}
+async function screenshot(page:Page,name:string){for(const close of await page.getByRole('button',{name:'关闭通知'}).all())await close.click();await expect.poll(()=>page.evaluate(()=>Array.from(document.images).every(img=>img.complete))).toBe(true);await page.screenshot({path:'test-results/screenshots/'+name+'.png',fullPage:false,animations:'disabled'})}
 test('real API workflow, billing, isolation and responsive UI',async({browser})=>{
  const admin=await browser.newContext({baseURL:'http://localhost:8080'}),merchant=await browser.newContext({baseURL:'http://localhost:8080'}),other=await browser.newContext({baseURL:'http://localhost:8080'})
  await api(admin.request,'/auth/login',{email:'admin@example.test',password:'CIonlyPassword123'})
@@ -24,12 +24,14 @@ test('real API workflow, billing, isolation and responsive UI',async({browser})=
  for(const [width,height,name] of [[1440,1000,'desktop'],[1024,768,'tablet'],[390,844,'mobile']] as const){await page.setViewportSize({width,height});await screenshot(page,name+'-products')}
  await page.goto('/create?product='+second.id);await expect(page.getByRole('button',{name:/商品展示/})).toHaveAttribute('aria-pressed','true')
  // Before provider configuration, a real error is displayed, no fabricated assets.
- await expect(page.getByText('管理员尚未配置文字接口')).toBeVisible();await screenshot(page,'unconfigured')
+ await expect(page.locator('.mobile-generation-summary')).toHaveText('管理员尚未配置文字接口');await screenshot(page,'unconfigured')
  for(const kind of ['text','image']){await api(admin.request,'/admin/providers',{kind,name:'CI '+kind,base_url:'http://fixture:8091/v1',model:'fixture',api_key:'ci-only',image_field:'image[]',max_references:6,size:'1024x1024',timeout_seconds:10,result_hosts:[]})}
  await page.reload();await expect(page.getByRole('button',{name:'生成素材',exact:true})).toBeEnabled();await expect(page.getByRole('button',{name:/商品展示/})).toHaveAttribute('aria-pressed','true')
  await page.getByLabel('选择商品',{exact:true}).selectOption(first);await page.getByLabel('选择商品',{exact:true}).selectOption(second.id)
  await expect(page.getByRole('button',{name:'生成素材',exact:true})).toBeEnabled()
- for(const [width,height,name] of [[1440,1000,'desktop'],[1024,768,'tablet'],[390,844,'mobile']] as const){await page.setViewportSize({width,height});await screenshot(page,name+'-create')}
+ for(const [width,height,name] of [[1440,1000,'desktop'],[1024,768,'tablet'],[390,844,'mobile']] as const){await page.setViewportSize({width,height});if(name==='mobile')await expect(page.locator('.mobile-generation-summary')).toHaveText('商品展示 · 23 点');await screenshot(page,name+'-create')}
+ await page.getByRole('button',{name:/抖音带货/}).click();await expect(page.locator('.mobile-generation-summary')).toHaveText('抖音带货 · 13 点');await expect(page.getByRole('button',{name:'生成素材',exact:true})).toBeEnabled()
+ await page.getByRole('button',{name:/商品展示/}).click();await expect(page.locator('.mobile-generation-summary')).toHaveText('商品展示 · 23 点');await expect(page.getByRole('button',{name:'生成素材',exact:true})).toBeEnabled()
  await page.getByRole('button',{name:'生成素材',exact:true}).click();await expect(page).toHaveURL(/creations\//)
  const id=page.url().split('/').at(-1)!
  let generation: {status:string;product_id:string;settled_credits:number;copy_version:number;copy_data:unknown;artifacts:{type:string;versions:{id:string;url:string}[]}[]}

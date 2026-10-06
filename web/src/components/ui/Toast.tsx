@@ -43,10 +43,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return (
     <ToastContext.Provider value={{ toast, success, error, info }}>
       {children}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none">
+      <div className="toast-stack fixed bottom-6 right-6 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none">
         {toasts.map((t) => (
           <div
             key={t.id}
+            role={t.type === 'error' ? 'alert' : 'status'}
             className={`pointer-events-auto flex items-start gap-3 p-4 rounded-xl border shadow-lg transition-all animate-in slide-in-from-bottom-2 ${
               t.type === 'success'
                 ? 'bg-white border-emerald-200 text-emerald-950 shadow-emerald-500/5'
@@ -60,6 +61,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             {t.type === 'info' && <Info className="w-5 h-5 text-neutral-600 shrink-0 mt-0.5" />}
             <div className="text-sm font-medium leading-relaxed flex-1">{t.text}</div>
             <button
+              aria-label="关闭通知"
               onClick={() => removeToast(t.id)}
               className="text-neutral-400 hover:text-neutral-600 p-0.5 rounded transition-colors"
             >
