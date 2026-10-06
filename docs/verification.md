@@ -6,7 +6,7 @@ Actions执行Go vet/race/单元与真实PostgreSQL事务测试、TypeScript严�
 
 浏览器验收包括新用户商品空状态、真实文件选择、第二件商品生成、默认展示、13点带货、同键重放、商家隔离、部分失败、结果未知、文案轮询保护、更新排版与ZIP下载、异步选题导入、360px溢出，以及各尺寸截图。
 
-截图Artifact位置：evidence-amd64 / evidence-arm64 内的 web/test-results/screenshots。1440×1000、1024×768、390×844；360px检查长商品名、长卖点和图片失败。成功编译不代替视觉评审。
+截图Artifact：ui-screenshots-amd64 / ui-screenshots-arm64；完整测试报告另存于 evidence-amd64 / evidence-arm64。截图固定视口为1440×1000、1024×768、390×844；360px检查长商品名、长卖点和图片失败。等待报价、排版状态及图片加载稳定后截图。成功编译不代替视觉评审。
 
 Go PostgreSQL测试验证12个并发重复提交、唯一预占/结算、第二件商品关联、过期报价、租户隔离、真实PNG ZIP与最新文案。提交SHA和Actions链接以GitHub运行实际结果为准，不将未完成运行写成通过。
 

@@ -1,4 +1,4 @@
-import {useState} from 'react'
+import {useEffect,useState} from 'react'
 import {useClock} from '../../hooks/useClock'
 import {useQuery} from '@tanstack/react-query'
 import {Link,useParams} from 'react-router-dom'
@@ -13,6 +13,7 @@ import {useToast} from '../ui/Toast'
 export function TaskDetailModal(){
  const {id}=useParams(),toast=useToast(),[draftOverride,setDraft]=useState<CopyData>(),[dirty,setDirty]=useState(false),[baseVersion,setBaseVersion]=useState(0),[busy,setBusy]=useState(false),[compare,setCompare]=useState(''),[retry,setRetry]=useState<Quote>(),now=useClock()
  const task=useQuery({queryKey:['generation',id],queryFn:()=>request<Generation>('/generations/'+id),refetchInterval:3000})
+ useEffect(()=>{if(id)refresh('me')},[id,task.data?.status,task.data?.settled_credits,task.data?.released_credits,task.data?.reserved_credits])
  const draft=draftOverride??task.data?.copy_data
  function change(next:CopyData){if(!dirty)setBaseVersion(task.data?.copy_version||0);setDraft(next);setDirty(true)}
  async function save(){if(!draft||!task.data)return;await request('/generations/'+id+'/copy','POST',{copy_data:draft,expected_version:dirty?baseVersion:task.data.copy_version});setDirty(false);setDraft(undefined);refresh('generation');toast.success('文案已保存，正在更新图片')}

@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test'
 import type {APIRequestContext,Page} from '@playwright/test'
 import fs from 'node:fs/promises'
 async function api<T>(client:APIRequestContext,path:string,data?:unknown,method='POST'):Promise<T>{const response=await client.fetch('/api/v1'+path,{method,data});const envelope=await response.json();expect(response.ok(),JSON.stringify(envelope)).toBeTruthy();return envelope.data as T}
-async function screenshot(page:Page,name:string){await page.screenshot({path:'test-results/screenshots/'+name+'.png',fullPage:true})}
+async function screenshot(page:Page,name:string){await expect.poll(()=>page.evaluate(()=>Array.from(document.images).every(img=>img.complete))).toBe(true);await page.screenshot({path:'test-results/screenshots/'+name+'.png',fullPage:false,animations:'disabled'})}
 test('real API workflow, billing, isolation and responsive UI',async({browser})=>{
  const admin=await browser.newContext({baseURL:'http://localhost:8080'}),merchant=await browser.newContext({baseURL:'http://localhost:8080'}),other=await browser.newContext({baseURL:'http://localhost:8080'})
  await api(admin.request,'/auth/login',{email:'admin@example.test',password:'CIonlyPassword123'})
@@ -28,6 +28,7 @@ test('real API workflow, billing, isolation and responsive UI',async({browser})=
  for(const kind of ['text','image']){await api(admin.request,'/admin/providers',{kind,name:'CI '+kind,base_url:'http://fixture:8091/v1',model:'fixture',api_key:'ci-only',image_field:'image[]',max_references:6,size:'1024x1024',timeout_seconds:10,result_hosts:[]})}
  await page.reload();await expect(page.getByRole('button',{name:'生成素材',exact:true})).toBeEnabled();await expect(page.getByRole('button',{name:/商品展示/})).toHaveAttribute('aria-pressed','true')
  await page.getByLabel('选择商品',{exact:true}).selectOption(first);await page.getByLabel('选择商品',{exact:true}).selectOption(second.id)
+ await expect(page.getByRole('button',{name:'生成素材',exact:true})).toBeEnabled()
  for(const [width,height,name] of [[1440,1000,'desktop'],[1024,768,'tablet'],[390,844,'mobile']] as const){await page.setViewportSize({width,height});await screenshot(page,name+'-create')}
  await page.getByRole('button',{name:'生成素材',exact:true}).click();await expect(page).toHaveURL(/creations\//)
  const id=page.url().split('/').at(-1)!
@@ -41,6 +42,9 @@ test('real API workflow, billing, isolation and responsive UI',async({browser})=
  const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'下载素材包'}).click();const download=await downloadPromise;const downloadPath=await download.path();expect(downloadPath).toBeTruthy()
  const zip=await fs.readFile(downloadPath!);expect(zip.subarray(0,2).toString()).toBe('PK')
  await expect.poll(async()=>(await api<{render_pending:boolean}>(merchant.request,'/generations/'+id,undefined,'GET')).render_pending).toBe(false)
+ await expect(page.getByText('文案已保存 · 图片更新中…')).not.toBeVisible();await expect(page.getByRole('button',{name:'下载素材包'})).toBeEnabled()
+ await expect(page.getByRole('button',{name:'查看额度明细'})).toContainText('477 点')
+ await expect(page.getByRole('button',{name:'查看额度明细'})).toContainText('预占 0')
  for(const [width,height,name] of [[1440,1000,'desktop'],[1024,768,'tablet'],[390,844,'mobile']] as const){await page.setViewportSize({width,height});await screenshot(page,name+'-detail')}
  // Concurrent duplicate submission is checked by the DB integration suite; browser/API checks same-key replay.
  const q=await api<{quote_id:string;idempotency_key:string;total_credits:number}>(merchant.request,'/generations/quote',{product_id:second.id,preset:'douyin_sales'});expect(q.total_credits).toBe(13)
@@ -56,7 +60,7 @@ test('real API workflow, billing, isolation and responsive UI',async({browser})=
   const task=await api<{id:string}>(merchant.request,'/generations',{quote_id:quote.quote_id,idempotency_key:quote.idempotency_key})
   await expect.poll(async()=>(await api<{status:string}>(merchant.request,'/generations/'+task.id,undefined,'GET')).status,{timeout:90000}).toBe(state)
   const result=await api<{settled_credits:number;reserved_credits:number}>(merchant.request,'/generations/'+task.id,undefined,'GET');expect(result.settled_credits).toBe(cost);expect(result.reserved_credits).toBe(tag==='UNKNOWN'?10:0)
-  await page.goto('/creations/'+task.id);await screenshot(page,tag.toLowerCase())
+  await page.goto('/creations/'+task.id);await expect(page.getByRole('heading',{name:'['+tag+'] 测试商品',exact:true})).toBeVisible();await screenshot(page,tag.toLowerCase())
  }
  // Real collector asynchronous task ID is retained across polling.
  await api(admin.request,'/admin/collector',{base_url:'http://fixture:8091',api_key:'ci-only'},'PUT')
