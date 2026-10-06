@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/Sakuralaaa/trend-studio/internal/studio"
 	"log/slog"
@@ -50,24 +51,77 @@ func run() error {
 	case "migrate":
 		return app.Migrate(ctx)
 	case "bootstrap-admin":
-		return app.Bootstrap(ctx, os.Getenv("BOOTSTRAP_ADMIN_EMAIL"), os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"))
+		account := os.Getenv("BOOTSTRAP_ADMIN_USERNAME")
+		if account == "" {
+			account = os.Getenv("BOOTSTRAP_ADMIN_EMAIL")
+		}
+		return app.Bootstrap(ctx, account, os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"))
 	case "worker":
 		return app.Worker(ctx)
-	case "api":
-		server := &http.Server{Addr: cfg.Addr, Handler: app.Router(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second}
-		go func() {
-			<-ctx.Done()
-			shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			_ = server.Shutdown(shutdown)
-		}()
-		slog.Info("api listening", "address", cfg.Addr)
-		err := server.ListenAndServe()
-		if err == http.ErrServerClosed {
-			return nil
+	case "serve":
+		// A single service keeps the API and worker on the same private volume.
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		if err := app.StorageInit(); err != nil {
+			return err
 		}
-		return err
+		if err := waitDatabase(ctx, app); err != nil {
+			return err
+		}
+		if err := app.Migrate(ctx); err != nil {
+			return err
+		}
+		workerDone := make(chan error, 1)
+		go func() {
+			workerDone <- app.Worker(ctx)
+			cancel()
+		}()
+		err := serveAPI(ctx, app)
+		cancel()
+		return errors.Join(err, <-workerDone)
+	case "api":
+		return serveAPI(ctx, app)
 	default:
 		return fmt.Errorf("unknown command %s", command)
 	}
+}
+
+func waitDatabase(ctx context.Context, app *studio.App) error {
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	for {
+		attempt, stop := context.WithTimeout(ctx, 5*time.Second)
+		err := app.DB.Ping(attempt)
+		stop()
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("database startup: %w", ctx.Err())
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func serveAPI(ctx context.Context, app *studio.App) error {
+	server := &http.Server{Addr: app.Cfg.Addr, Handler: app.Router(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second}
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-ctx.Done():
+			shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			_ = server.Shutdown(shutdown)
+		}
+	}()
+	slog.Info("api listening", "address", app.Cfg.Addr)
+	err := server.ListenAndServe()
+	if err == http.ErrServerClosed {
+		return nil
+	}
+	return err
 }

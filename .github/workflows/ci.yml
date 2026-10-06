@@ -87,12 +87,12 @@ jobs:
           ! grep -q 'build:' deploy/collector/compose.yml
       - name: Start real API, worker and database
         run: |
-          docker compose -f tests/compose.yml up -d
+          docker compose -f tests/zeabur.compose.yml up -d
           for n in $(seq 1 90); do
-            if curl --fail -s http://localhost:8080/health/ready; then exit 0; fi
+            if curl --fail -s http://localhost:8080/health/ready; then docker compose -f tests/zeabur.compose.yml wait bootstrap; exit $?; fi
             sleep 2
           done
-          docker compose -f tests/compose.yml logs
+          docker compose -f tests/zeabur.compose.yml logs
           exit 1
       - name: Start upstream collector migration and runtime
         run: |
@@ -120,7 +120,7 @@ jobs:
         if: always()
         run: |
           mkdir -p artifacts
-          docker compose -f tests/compose.yml logs --no-color > artifacts/runtime.log
+          docker compose -f tests/zeabur.compose.yml logs --no-color > artifacts/runtime.log
           docker compose --env-file deploy/collector/.env -f deploy/collector/compose.yml ps > artifacts/collector-status.txt
           docker compose --env-file deploy/collector/.env -f deploy/collector/compose.yml logs --no-color > artifacts/collector-runtime.log
       - uses: actions/upload-artifact@v4
@@ -139,7 +139,7 @@ jobs:
       - name: Cleanup disposable CI data
         if: always()
         run: |
-          docker compose -f tests/compose.yml down -v
+          docker compose -f tests/zeabur.compose.yml down -v
           docker compose --env-file deploy/collector/.env -f deploy/collector/compose.yml down -v
   publish:
     needs: [checks, containers]

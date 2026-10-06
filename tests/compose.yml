@@ -28,7 +28,7 @@ services:
     image: trend-studio:ci
     command: ["bootstrap-admin"]
     env_file: runtime.env
-    environment: {BOOTSTRAP_ADMIN_EMAIL: admin@example.test, BOOTSTRAP_ADMIN_PASSWORD: CIonlyPassword123}
+    environment: {BOOTSTRAP_ADMIN_USERNAME: admin, BOOTSTRAP_ADMIN_PASSWORD: '731842'}
     volumes: ["data:/data"]
     depends_on:
       migrate: {condition: service_completed_successfully}

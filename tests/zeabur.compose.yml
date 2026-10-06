@@ -1,0 +1,42 @@
+name: trend-zeabur-ci
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment: {POSTGRES_USER: studio, POSTGRES_PASSWORD: ci-only-password, POSTGRES_DB: studio}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U studio"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  fixture:
+    image: trend-fixture:ci
+  storage:
+    image: alpine:3.22
+    command: ["/bin/sh", "-c", "chown 65532:65532 /data && chmod 700 /data"]
+    volumes: ["data:/data"]
+  api:
+    image: trend-studio:ci
+    user: "65532:65532"
+    entrypoint: ["/app/trend-studio"]
+    command: ["serve"]
+    env_file: runtime.env
+    ports: ["8080:8080"]
+    volumes: ["data:/data"]
+    depends_on:
+      db: {condition: service_healthy}
+      storage: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "/app/trend-studio", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  bootstrap:
+    image: trend-studio:ci
+    command: ["bootstrap-admin"]
+    env_file: runtime.env
+    environment: {BOOTSTRAP_ADMIN_USERNAME: admin, BOOTSTRAP_ADMIN_PASSWORD: '731842'}
+    volumes: ["data:/data"]
+    depends_on:
+      api: {condition: service_healthy}
+volumes:
+  data:

@@ -1,0 +1,25 @@
+{
+  "source": {
+    "image": "ghcr.io/sakuralaaa/trend-studio:sha-REPLACE_VERIFIED_COMMIT",
+    "command": ["/app/trend-studio"],
+    "args": ["serve"],
+    "runAsUserID": 65532
+  },
+  "ports": [{"id": "web", "port": 8080, "type": "HTTP"}],
+  "portForwarding": {"enabled": false},
+  "healthCheck": {"type": "HTTP", "port": "web", "http": {"path": "/health/ready"}},
+  "volumes": [{"id": "studio-data", "dir": "/data"}],
+  "init": [{
+    "id": "storage-owner",
+    "image": "alpine:3.22",
+    "command": ["/bin/sh", "-c", "chown 65532:65532 /data && chmod 700 /data"],
+    "volumes": [{"id": "studio-data", "mountPath": "/data"}]
+  }],
+  "env": {
+    "DATABASE_URL": {"default": "${POSTGRES_CONNECTION_STRING}"},
+    "APP_MASTER_KEY": {"default": "REPLACE_PRIVATE_BASE64_32_BYTE_KEY"},
+    "APP_ORIGIN": {"default": "${ZEABUR_WEB_URL}"},
+    "DATA_DIR": {"default": "/data"},
+    "LISTEN_ADDR": {"default": ":8080"}
+  }
+}

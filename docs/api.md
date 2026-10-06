@@ -6,7 +6,7 @@
 
 | API | 方法与数据 |
 |---|---|
-| /auth/login | POST email,password |
+| /auth/login | POST email,password；email兼容字段可填写管理员用户名或商家邮箱 |
 | /auth/me | GET user, nullable tenant, capabilities |
 | /auth/invite | POST token,email,name,password；一次性7天邀请 |
 | /auth/reset | POST token,password |

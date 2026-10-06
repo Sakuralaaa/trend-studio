@@ -48,13 +48,27 @@ func validatePassword(s string) error {
 func validEmail(s string) bool {
 	return strings.Contains(s, "@") && len(s) <= 254 && !strings.ContainsAny(s, "\r\n ")
 }
+func validAdminAccount(s string) bool {
+	if validEmail(s) {
+		return true
+	}
+	if len(s) < 3 || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-' || r == '.') {
+			return false
+		}
+	}
+	return true
+}
 func (a *App) Bootstrap(ctx context.Context, email, password string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
-	if !validEmail(email) {
-		return fmt.Errorf("valid BOOTSTRAP_ADMIN_EMAIL required")
+	if !validAdminAccount(email) {
+		return fmt.Errorf("valid administrator username or email required")
 	}
-	if err := validatePassword(password); err != nil {
-		return err
+	if len(password) < 6 || len(password) > 128 {
+		return fmt.Errorf("administrator initial password must be 6 to 128 bytes")
 	}
 	tx, err := a.DB.Begin(ctx)
 	if err != nil {
@@ -121,7 +135,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) error {
 	var ph string
 	err = a.DB.QueryRow(r.Context(), "SELECT id,tenant_id,email,name,role,password_hash FROM users WHERE email=$1", strings.ToLower(strings.TrimSpace(in.Email))).Scan(&u.ID, &u.TenantID, &u.Email, &u.Name, &u.Role, &ph)
 	if err != nil || !passwordMatches(ph, in.Password) {
-		return problem(401, "INVALID_CREDENTIALS", "邮箱或密码不正确")
+		return problem(401, "INVALID_CREDENTIALS", "账号或密码不正确")
 	}
 	if err = a.setSession(r.Context(), w, u.ID); err != nil {
 		return err

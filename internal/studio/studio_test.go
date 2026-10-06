@@ -68,6 +68,12 @@ func TestPassword(t *testing.T) {
 	if !passwordMatches(p, "StrongPassword9") || passwordMatches(p, "other") {
 		t.Fatal("argon2 verification")
 	}
+	if !validAdminAccount("admin") || validAdminAccount("admin user") || validAdminAccount("../admin/") {
+		t.Fatal("administrator login account validation")
+	}
+	if validatePassword("731842") == nil {
+		t.Fatal("merchant password policy was weakened")
+	}
 }
 func TestDatabaseWorkflow(t *testing.T) {
 	raw := os.Getenv("TEST_DATABASE_URL")

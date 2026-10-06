@@ -5,7 +5,7 @@ async function api<T>(client:APIRequestContext,path:string,data?:unknown,method=
 async function screenshot(page:Page,name:string){for(const close of await page.getByRole('button',{name:'关闭通知'}).all())await close.click();await expect.poll(()=>page.evaluate(()=>Array.from(document.images).every(img=>img.complete))).toBe(true);await page.screenshot({path:'test-results/screenshots/'+name+'.png',fullPage:false,animations:'disabled'})}
 test('real API workflow, billing, isolation and responsive UI',async({browser})=>{
  const admin=await browser.newContext({baseURL:'http://localhost:8080'}),merchant=await browser.newContext({baseURL:'http://localhost:8080'}),other=await browser.newContext({baseURL:'http://localhost:8080'})
- await api(admin.request,'/auth/login',{email:'admin@example.test',password:'CIonlyPassword123'})
+ await api(admin.request,'/auth/login',{email:'admin',password:'731842'})
  for(const [ctx,email] of [[merchant,'merchant@example.test'],[other,'other@example.test']] as const){const invite=await api<{url:string}>(admin.request,'/admin/invites',{email,default_credits:500,name:''});await api(ctx.request,'/auth/invite',{token:new URL(invite.url).searchParams.get('token'),email,name:'日常好物店',password:'CImerchantPassword123'})}
  const page=await merchant.newPage();await page.goto('/');await expect(page).toHaveURL(/products/);await expect(page.getByRole('heading',{name:'上传你的第一件商品'})).toBeVisible()
  for(const [width,height,name] of [[1440,1000,'desktop'],[1024,768,'tablet'],[390,844,'mobile']] as const){await page.setViewportSize({width,height});await screenshot(page,name+'-empty')}
@@ -75,6 +75,6 @@ test('real API workflow, billing, isolation and responsive UI',async({browser})=
  expect((await merchant.request.post('/api/v1/products/'+long.id+'/references',{multipart:{file:{name:'long.png',mimeType:'image/png',buffer:reference}}})).ok()).toBeTruthy()
  await page.route('**/api/v1/assets/**',route=>route.abort())
  await page.goto('/products');await page.setViewportSize({width:360,height:844});await expect(page.getByText('图片未加载').first()).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await screenshot(page,'mobile-long-content-image-failure')
- const adminPage=await admin.newPage();await adminPage.goto('/admin');await expect(adminPage.getByRole('heading',{name:'管理平台'})).toBeVisible();for(const [width,height,name] of [[1440,1000,'desktop'],[1024,768,'tablet'],[390,844,'mobile']] as const){await adminPage.setViewportSize({width,height});await screenshot(adminPage,name+'-admin')}
+ const adminPage=await admin.newPage();await adminPage.goto('/login');await adminPage.getByLabel('账号').fill('admin');await adminPage.getByLabel('密码').fill('731842');await adminPage.getByRole('button',{name:'登录',exact:true}).click();await expect(adminPage).toHaveURL(/admin/);await expect(adminPage.getByRole('heading',{name:'管理平台'})).toBeVisible();for(const [width,height,name] of [[1440,1000,'desktop'],[1024,768,'tablet'],[390,844,'mobile']] as const){await adminPage.setViewportSize({width,height});await screenshot(adminPage,name+'-admin')}
  await admin.close();await merchant.close();await other.close()
 })
